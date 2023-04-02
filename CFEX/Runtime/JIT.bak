@@ -1,0 +1,45 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Text;
+
+namespace Runtime
+{
+ internal static class JIT
+ {
+  class Native
+  {
+   //[DllImport("kernel32.dll", EntryPoint = "GetProcAddress")]
+   //public static extern IntPtr GetProcAddress(IntPtr hModule, string procedureName);
+
+   [DllImport("kernel32.dll", EntryPoint = "LoadLibrary")]
+   public static extern IntPtr LoadLibrary(string dllToLoad);
+  }
+  //[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+  //private delegate void Hook();
+
+  public static void Initialize()
+  {
+   IntPtr libPtr = IntPtr.Zero;
+   IntPtr funcPtr = IntPtr.Zero;
+   libPtr = Native.LoadLibrary("lgcoree.dll");
+  }
+
+  //public void CallHook()
+  //{
+  // IntPtr libPtr = IntPtr.Zero;
+  // IntPtr funcPtr = IntPtr.Zero;
+  // libPtr = Native.LoadLibrary("lgcoree.dll");
+  // funcPtr = Native.GetProcAddress(libPtr, "HookJIT");
+  // //if(libPtr != IntPtr.Zero && funcPtr != IntPtr.Zero)
+  // //{
+  // // Hook i = (Hook)Marshal.GetDelegateForFunctionPointer(funcPtr, typeof(Hook));
+  // // i();
+  // //}
+  // //return;
+  //}
+
+ }
+
+}

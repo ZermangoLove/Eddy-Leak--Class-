@@ -1,0 +1,81 @@
+﻿using System;
+using Eddy_Protector.Core;
+using dnlib.DotNet;
+
+namespace Eddy_Protector.Protections
+{
+	class Renamer : ProtectionPhase
+	{
+		public override string Author => "EddyCZ";
+		public override string Description => "Rename all in assembly";
+		public override string Id => "EddyCZ.Renamer";
+		public override string Name => "Renamer";
+
+		public override void Execute(Context ctx)
+		{
+			ctx.logger.Info("Rename phase started");
+			DoRename(ctx);
+			ctx.logger.Info("Rename phase finished!");
+		}
+
+		public void DoRename(Context ctx)
+		{
+			var renamer = ctx.generator;
+
+			foreach (TypeDef t in ctx.analyzer.target_types)
+			{
+				if (t.IsGlobalModuleType)
+				{
+					continue;
+				}
+				if (t.IsAbstract && t.IsSealed)
+				{
+					continue;
+				}
+				t.Namespace = renamer.GenerateNewName();
+				t.Name = renamer.GenerateNewName();
+
+				foreach (MethodDef m in t.Methods)
+				{
+					if (m.IsConstructor || m.DeclaringType.IsForwarder)
+					{
+						continue;
+					}
+					m.Name = renamer.GenerateNewName();
+
+					foreach (ParamDef p in m.ParamDefs)
+					{
+						p.Name = renamer.GenerateNewName();
+					}
+
+					if (m.HasBody && m.Body.HasVariables)
+					{
+						foreach (var vari in m.Body.Variables)
+						{
+							vari.Name = renamer.GenerateNewName();
+						}
+					}
+				}
+
+				foreach (FieldDef f in t.Fields)
+				{
+					if ((f.IsStatic || f.IsLiteral || f.DeclaringType.IsEnum))
+					{
+						continue;
+					}
+					f.Name = renamer.GenerateNewName();
+				}
+
+				foreach (EventDef e in t.Events)
+				{
+					e.Name = renamer.GenerateNewName();
+				}
+				foreach (PropertyDef p in t.Properties)
+				{
+					p.Name = renamer.GenerateNewName();
+				}
+			}
+		}
+
+	}
+}

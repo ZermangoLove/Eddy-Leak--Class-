@@ -1,0 +1,113 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+
+using dnlib.DotNet;
+using Protector.Helpers;
+using Eddy_Protector_Core.Core;
+using System.Security.Cryptography;
+using dnlib.DotNet.Emit;
+
+namespace Protector.Protections
+{
+ class RuntimeBinder
+ {
+
+  ModuleDef CurrentModule;
+  List<byte[]> RuntimeModules;
+  ProtectorContext ctx;
+
+  public ModuleDef BindRuntimeBinaries(List<byte[]> rtModules, ModuleDef module, ProtectorContext context)
+  {
+
+   CurrentModule = module;
+   RuntimeModules = rtModules;
+   ctx = context;
+
+   Inject();
+
+   return CurrentModule;
+  }
+
+
+  public void Inject()
+  {
+
+   MethodDef compression = null;
+
+   int num = RuntimeModules.Count;
+
+   for (int i = 0; i < num;i++)
+   {  
+    int keyA = ctx.random_generator.RandomInt();
+    int keyB = ctx.random_generator.RandomInt();
+    int keyC = ctx.random_generator.RandomInt();
+
+    int resIDn = (~(~(~(~(keyA) ^ (keyB) ^ (keyC) ^ (num + sizeof(ulong))))) >> (num + 1 + sizeof(short)));
+    string resIDs = Encoding.BigEndianUnicode.GetString(SHA1.Create().ComputeHash(BitConverter.GetBytes(resIDn)));
+    byte[] compressed = new Compression().Compress(RuntimeModules.ElementAt(i));
+    AddResource(CurrentModule, resIDs, compressed);
+
+
+    TypeDefUser NewType = new TypeDefUser(ctx.random_generator.GenerateString(),
+ CurrentModule.CorLibTypes.Object.TypeDefOrRef);
+    NewType.Attributes = TypeAttributes.NotPublic |
+     TypeAttributes.AutoLayout |
+         TypeAttributes.Class |
+         TypeAttributes.AnsiClass;
+    CurrentModule.Types.Add(NewType);
+
+    var rtType = DnLibHelper.GetRuntimeType("ProtectorRuntime.Runtime.RuntimeBinder");
+    IEnumerable<IDnlibDef> defs = InjectHelper.Inject(rtType, NewType, CurrentModule);
+
+    MethodDef init = defs.OfType<MethodDef>().Single(method => method.Name == "Initialize");
+    init.Name = ctx.random_generator.GenerateString();
+
+    MethodDef loader = defs.OfType<MethodDef>().Single(method => method.Name == "LoadLibraryDynamic");
+    loader.Name = ctx.random_generator.GenerateString();
+
+    MutationHelper.InjectKeys(loader, new[] { 0, 1, 2, 3 }, new[] { num, keyA, keyB, keyC });
+
+    List<Instruction> instrs = loader.Body.Instructions.ToList();
+    var comp = new Compression();
+    for (int j = 0; j < instrs.Count; j++)
+    {
+     Instruction instr = instrs[j];
+     if (instr.OpCode == OpCodes.Call)
+     {
+      var method = (IMethod)instr.Operand;
+
+      if (method.DeclaringType.Name == "Lzma" &&
+               method.Name == "Decompress")
+      {
+       if(compression == null)
+       {
+        MethodDef decomp = comp.GetRuntimeDecompressor(ctx, CurrentModule, member => { });
+        instr.Operand = decomp;
+        compression = decomp;
+       }
+       else
+       {
+        instr.Operand = compression;
+       }
+       
+       
+      }
+     }
+    }
+
+    MethodDef cctor = CurrentModule.GlobalType.FindOrCreateStaticConstructor();
+    cctor.Body.Instructions.Insert(0, Instruction.Create(OpCodes.Call, init));
+   }
+  }
+
+  private void AddResource(ModuleDef mod, string name, byte[] data)
+  {
+   mod.Resources.Add(new EmbeddedResource(name, data,
+    ManifestResourceAttributes.Private));
+  }
+
+ }
+}

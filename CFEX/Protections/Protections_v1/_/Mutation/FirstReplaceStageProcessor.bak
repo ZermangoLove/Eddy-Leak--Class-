@@ -1,0 +1,163 @@
+﻿using dnlib.DotNet;
+using dnlib.DotNet.Emit;
+using Eddy_Protector.Core;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+
+namespace Eddy_Protector.Protections.Mutation
+{
+	class FirstReplaceStageProcessor
+	{
+		private ModuleDef module;
+		CilBody body;
+		private int operand;
+		private int i;
+		private IList<Instruction> instructions;
+		private Importer importer;
+		private bool uintMode = false;
+
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="body">Body of current method</param>
+		/// <param name="i">Index of body</param>
+		/// 
+
+
+		public FirstReplaceStageProcessor(ModuleDef module, CilBody body, int i)
+		{
+			this.module = module;
+			instructions = body.Instructions;
+			operand = instructions[i].GetLdcI4Value();
+			this.body = body;
+			this.i = i;
+			if (instructions[i + 1].OpCode == OpCodes.Call) uintMode = true;
+			importer = new Importer(module);
+		}
+
+		public void Replace(ref int forward)
+		{
+			switch (new Random().Next(0, 2))
+			{
+				case 0: timespanReplacer(); forward += 8; break;
+				//ase 1: shortifInliner(); forward += 7; break;
+				default: ifInliner(); forward += 15; break;
+			}
+		}
+
+		private void ifInliner()
+		{
+			if (uintMode) return;
+			Local local = new Local(importer.ImportAsTypeSig(typeof(int)));
+			int localvalue = new Random().Next(operand + 1, operand + 5);
+			int randeql = new Random().Next(operand + 1, operand + 5);
+			body.Variables.Add(local);
+
+			instructions[i] = Instruction.CreateLdcI4(localvalue);
+
+			Instruction nop = OpCodes.Nop.ToInstruction();
+			Instruction ldloc = OpCodes.Ldloc_S.ToInstruction(local);
+
+			bool equals = localvalue == operand;
+
+			//can produce issues
+			DnlibUtils.InsertInstructions(instructions,
+			new Dictionary<Instruction, int>()
+			{
+																{ OpCodes.Stloc_S.ToInstruction(local), i + 1}, //stores localvalue to int_lcl
+                { OpCodes.Ldloc_S.ToInstruction(local), i + 2} , //loads int_lcl to stack
+                { Instruction.CreateLdcI4(randeql), i + 3},
+																{ OpCodes.Ceq.ToInstruction(), i + 4},
+																{ OpCodes.Brfalse_S.ToInstruction(nop), i + 5},
+																{ OpCodes.Nop.ToInstruction(), i + 6},
+																{ Instruction.CreateLdcI4(equals ? operand : localvalue), i + 7},
+																{ OpCodes.Stloc_S.ToInstruction(local), i + 8},
+																{ OpCodes.Nop.ToInstruction(), i + 9},
+																{ OpCodes.Br_S.ToInstruction(ldloc), i + 10},
+																{ nop, i + 11},
+																{ Instruction.CreateLdcI4(equals ? localvalue : operand), i + 12},
+																{ OpCodes.Stloc_S.ToInstruction(local), i + 13},
+																{ OpCodes.Nop.ToInstruction(), i + 14},
+																{ ldloc, i + 15},
+	}
+	);
+
+		}
+
+		private void shortifInliner()
+		{
+			Local int_lcl = new Local(module.CorLibTypes.Int32);
+			body.Variables.Add(int_lcl);
+			int rnd_0 = new Random().Next(operand + 1, operand + 5); // rnd_0 > x;
+			int rnd_1 = new Random().Next(operand + 1, operand + 5); // x > rnd_1;
+
+			int randval = new Random().Next(operand + 1, operand + 5);
+
+			bool isHigher = rnd_0 > rnd_1;
+
+			Instruction ldci4 = Instruction.CreateLdcI4((isHigher) ? operand : randval);
+			Instruction stloc = OpCodes.Stloc_S.ToInstruction(int_lcl);
+
+			instructions[i] = Instruction.CreateLdcI4(rnd_0);
+			DnlibUtils.InsertInstructions(instructions,
+			new Dictionary<Instruction, int>()
+			{
+																{ Instruction.CreateLdcI4(rnd_1), i + 1},
+																{ OpCodes.Bgt_S.ToInstruction(ldci4), i + 2},
+																{ Instruction.CreateLdcI4(rnd_1), i + 3},
+																{ OpCodes.Br_S.ToInstruction(stloc), i + 4},
+																{ ldci4 , i + 5},
+																{ stloc, i + 6},
+																{ OpCodes.Ldloc_S.ToInstruction(int_lcl), i + 7},
+			}
+
+	);
+		}
+
+
+		private void timespanReplacer()
+		{
+
+			if (operand < 1 || operand > 10099999) return;
+
+			TypeRef timespanRef = new TypeRefUser(module, "System", "TimeSpan", module.CorLibTypes.AssemblyRef);
+			int hours = new Random().Next(0, 10);
+			int minutes = new Random().Next(0, 10);
+			int days = instructions[i].GetLdcI4Value() - hours - minutes;
+			Local lcl = new Local(importer.Import(timespanRef.ToTypeSig()));
+			body.Variables.Add(lcl);
+			instructions[i] = Instruction.CreateLdcI4(days);
+
+			DnlibUtils.InsertInstructions(instructions,
+			new Dictionary<Instruction, int>()
+			{
+																{ Instruction.CreateLdcI4(convertHoursToDays(hours)), i + 1},
+																{ Instruction.CreateLdcI4(convertMinutesToDays(minutes)), i + 2} ,
+																{ Instruction.CreateLdcI4(new Random().Next(0, 59)), i + 3},
+																{ OpCodes.Newobj.ToInstruction(importer.Import(typeof(TimeSpan).GetConstructor(
+																		new Type[] { typeof(int), typeof(int), typeof(int), typeof(int) }))), i + 4},
+																{ OpCodes.Stloc_S.ToInstruction(lcl), i + 5},
+																{ OpCodes.Ldloca_S.ToInstruction(lcl), i + 6},
+																{ OpCodes.Call.ToInstruction(importer.Import(typeof(TimeSpan).GetMethod("get_TotalDays"))), i + 7},
+																{ OpCodes.Conv_I4.ToInstruction(), i + 8},
+			}
+			);
+
+		}
+
+		const int dayinhours = 24;
+		const int dayinmins = 1440;
+		private int convertHoursToDays(int days)
+		{
+			return days * dayinhours;
+		}
+
+		private int convertMinutesToDays(int days)
+		{
+			return days * dayinmins;
+		}
+
+	}
+}
